@@ -1,4 +1,4 @@
-# Putting the VGR Brand Score on your VGR "Intelligence" page (auto-publishing)
+# Putting the VGR Brand Search Interest on your VGR "Intelligence" page (auto-publishing)
 
 Same mechanism as **VGR 40** — two things live in the cloud so your PC never has
 to be on for the page to stay up:
@@ -28,13 +28,13 @@ https://<user>.github.io/<repo>/brand_index_data.json  <- the data feed (CORS-op
 
 ## Step 1 — put the project on GitHub (one time)
 
-Create an **empty** repo named `vgr-brand-index` on github.com/almarpause, then:
+Create an **empty** repo named `vgr-brand-search-interest` on github.com/almarpause, then:
 
 ```bash
 cd C:\Users\aresi\Claude\code\brand-index
 git add .
-git commit -m "VGR Brand Score — website payload + publisher"
-git remote add origin https://github.com/almarpause/vgr-brand-index.git
+git commit -m "VGR Brand Search Interest — website payload + publisher"
+git remote add origin https://github.com/almarpause/vgr-brand-search-interest.git
 git push -u origin master
 ```
 
@@ -43,7 +43,7 @@ Or just double-click **`push.bat`** (it wires the remote and pushes `master`).
 ## Step 2 — turn on Pages + let the Action run
 
 - On GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-- **Actions** tab → run **"Refresh VGR Brand Score"** once (`Run workflow`) to
+- **Actions** tab → run **"Refresh VGR Brand Search Interest"** once (`Run workflow`) to
   publish immediately; after that it re-publishes on every push and weekly.
 - Your dashboard is now live at `https://<user>.github.io/<repo>/`.
 
@@ -56,7 +56,7 @@ published version; nothing else to maintain:
 ```html
 <iframe
   src="https://<user>.github.io/<repo>/"
-  title="VGR Brand Score — Top 500 Fashion Brands by Attention"
+  title="VGR Brand Search Interest — Top 500 Fashion Brands by Attention"
   style="width:100%;height:1800px;border:0;border-radius:16px;"
   loading="lazy">
 </iframe>
@@ -67,7 +67,7 @@ Paste this component into your Lovable project and use `<BrandIndex />` on the
 Intelligence page. It only needs the JSON URL.
 
 ```tsx
-// BrandIndex.tsx — VGR Brand Score, reads the live data feed.
+// BrandIndex.tsx — VGR Brand Search Interest, reads the live data feed.
 import { useEffect, useMemo, useState } from "react";
 
 const DATA_URL = "https://<user>.github.io/<repo>/brand_index_data.json";
@@ -108,7 +108,7 @@ export default function BrandIndex() {
   return (
     <section className="space-y-6">
       <header>
-        <h2 className="text-2xl font-semibold tracking-tight">VGR Brand Score — Top {d.n_brands} Fashion Brands by Attention</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">VGR Brand Search Interest — Top {d.n_brands} Fashion Brands by Attention</h2>
         <p className="text-sm opacity-60">
           Google search {d.method.google_search_pct}% · Google news {d.method.google_news_pct}% ·
           Wikipedia {d.method.wikipedia_pct}% — {d.scale} · {d.month} ·

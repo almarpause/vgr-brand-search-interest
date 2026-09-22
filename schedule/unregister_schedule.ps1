@@ -1,4 +1,4 @@
-# Remove the VGR Brand Score scheduled tasks.
+# Remove the VGR Brand Search Interest scheduled tasks.
 #   powershell -ExecutionPolicy Bypass -File schedule\unregister_schedule.ps1
 $ErrorActionPreference = "Continue"
 foreach ($task in @("VBI-FetchNightly", "VBI-Monthly")) {

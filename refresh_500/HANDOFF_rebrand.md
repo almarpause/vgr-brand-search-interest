@@ -145,7 +145,7 @@
 
 ## Website publishing infrastructure (2026-09-09) — replicates VGR 40
 
-Goal: get the 500-brand Brand Score onto the VGR website the same way VGR 40 is
+Goal: get the 500-brand Brand Search Interest onto the VGR website the same way VGR 40 is
 published (GitHub Pages + a GitHub Action, embedded in Lovable via iframe or a
 React component that reads a JSON feed).
 
@@ -153,7 +153,7 @@ React component that reads a JSON feed).
 `push.bat`, `dashboard.py`, `.github/workflows/refresh-index.yml`. VGR 40 repo:
 `github.com/almarpause/vgr-fashion50.git`. Its Action re-pulls Yahoo live daily.
 
-**Key difference:** the Brand Score's inputs (pytrends web+news, Wikipedia
+**Key difference:** the Brand Search Interest's inputs (pytrends web+news, Wikipedia
 pageviews) are rate-limited and collected LOCALLY, so the cloud Action does NOT
 re-collect. It deterministically re-renders the site from the committed
 `refresh_500/*.csv`. Refresh flow = re-run local collection → commit new CSVs →
@@ -167,12 +167,12 @@ push → Action republishes.
   aug_rank, trends/news levels, per-source mom%, wikipedia pageviews, wikidata_url;
   plus tiers, top20, movers). Reads index_500_refreshed.csv + gtrends_news_500.csv
   + aug_vgr_reconstructed.csv + dashboard_template.html + logo asset.
-- `.github/workflows/refresh-index.yml` — "Refresh VGR Brand Score": on push to
+- `.github/workflows/refresh-index.yml` — "Refresh VGR Brand Search Interest": on push to
   main/master + weekly Mon 06:00 UTC + manual dispatch. pip install
   requirements-web.txt → python dashboard.py → assemble site/ (index.html +
   brand_index_data.json) → upload-pages-artifact@v3 → deploy-pages@v4.
 - `requirements-web.txt` — pandas>=2.2 (CI publish only; full pipeline stays local).
-- `push.bat` — one-click push to `github.com/almarpause/vgr-brand-index.git` (branch
+- `push.bat` — one-click push to `github.com/almarpause/vgr-brand-search-interest.git` (branch
   master). NOTE: repo must be created empty on GitHub first.
 - `WEB_DEPLOY.md` — the playbook (Steps 1-3 + iframe embed + `<BrandIndex />` React
   component reading the JSON feed, adapted from VGR 40's FashionIndex).
@@ -182,7 +182,7 @@ push → Action republishes.
 #3, tiers A8/B54/C438. CI assemble step simulated OK.
 
 **NOT yet done (needs user action / explicit permission):**
-1. Create empty GitHub repo `vgr-brand-index` under almarpause.
+1. Create empty GitHub repo `vgr-brand-search-interest` under almarpause.
 2. Push (`push.bat` or manual) — DEPLOY action, needs explicit go-ahead.
 3. GitHub: Settings → Pages → Source: GitHub Actions; run the Action once.
 4. Paste iframe or `<BrandIndex />` into the Lovable Intelligence page; set DATA_URL.

@@ -1,4 +1,4 @@
-"""Build the VGR Brand Score website payload from the refreshed collection.
+"""Build the VGR Brand Search Interest website payload from the refreshed collection.
 
 Produces two files at the project root (mirrors the VGR 40 `dashboard.py`):
 
