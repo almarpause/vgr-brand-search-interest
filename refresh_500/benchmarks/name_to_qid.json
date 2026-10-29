@@ -1,0 +1,22 @@
+{
+  "Prada": {"qid": "Q193136", "label": "Prada", "description": "Italian luxury fashion house", "resolution": "cached-wikidata"},
+  "Chanel": {"qid": "Q218115", "label": "Chanel", "description": "French fashion house", "resolution": "known-qid"},
+  "Miu Miu": {"qid": "Q552230", "label": "Miu Miu", "description": "Italian fashion house", "resolution": "cached-wikidata"},
+  "Gucci": {"qid": "Q178516", "label": "Gucci", "description": "Italian luxury fashion house based in Florence, Italy", "resolution": "cached-wikidata"},
+  "Saint Laurent": {"qid": "Q2282172", "label": "Yves Saint Laurent", "description": "French luxury fashion house", "resolution": "cached-wikidata"},
+  "Dior": {"qid": "Q542767", "label": "Christian Dior", "description": "French multinational luxury fashion house", "resolution": "cached-wikidata"},
+  "Burberry": {"qid": "Q390107", "label": "Burberry", "description": "English fashion company", "resolution": "cached-wikidata"},
+  "Ralph Lauren": {"qid": "Q1641437", "label": "Ralph Lauren", "description": "American fashion and lifestyle company", "resolution": "cached-wikidata"},
+  "Chloé": {"qid": "Q1075391", "label": "Chloé", "description": "French fashion house created by Gaby Aghion", "resolution": "cached-wikidata"},
+  "Celine": {"qid": "Q948531", "label": "Celine", "description": "French luxury fashion house", "resolution": "cached-wikidata"},
+  "Bottega Veneta": {"qid": "Q894874", "label": "Bottega Veneta", "description": "Italian fashion company", "resolution": "cached-wikidata"},
+  "Coach": {"qid": "Q727697", "label": "Coach", "description": "", "resolution": "known-qid"},
+  "Massimo Dutti": {"qid": "Q788231", "label": "Massimo Dutti", "description": "multinational clothing retailer from Spain", "resolution": "cached-wikidata"},
+  "The Row": {"qid": "Q25351941", "label": "The Row", "description": "Fashion house based in New York City", "resolution": "cached-wikidata"},
+  "Moncler": {"qid": "Q1548951", "label": "Moncler", "description": "Italian luxury fashion company", "resolution": "cached-wikidata"},
+  "Dries Van Noten": {"qid": "Q124984014", "label": "Dries Van Noten", "description": "fashion label", "resolution": "known-qid"},
+  "Loewe": {"qid": "Q966905", "label": "Loewe", "description": "fashion house specialising in leather goods, clothing, perfumes and other fashion accessories", "resolution": "cached-wikidata"},
+  "Diesel": {"qid": "Q158285", "label": "Diesel", "description": "Italian retail clothing company, located in Breganze, Italy", "resolution": "cached-wikidata"},
+  "Stone Island": {"qid": "Q950042", "label": "Stone Island", "description": "Italian brand", "resolution": "cached-wikidata"},
+  "Khaite": {"qid": "Q136953861", "label": "Khaite", "description": "luxury women's wear brand", "resolution": "known-qid"}
+}

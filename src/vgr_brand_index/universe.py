@@ -27,7 +27,7 @@ import hashlib
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import httpx
@@ -54,6 +54,19 @@ EXTRA_QIDS = [
     "Q3895",       # Adidas — the flagship brand itself (no root catches it; it was
                    # only ever present as the Trends anchor, never a ranked member).
 ]
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APPROVED_FORCE_INCLUDE = REPO_ROOT / "refresh_500" / "benchmarks" / "force_include_approved.csv"
+
+# Only these sources are precise enough to survive without a Wikipedia sitelink.
+# Clothing-store-chain remains on the conservative side of the gate because the
+# class includes retailers that are not necessarily consumer fashion brands.
+HIGH_PRECISION_PROVENANCE = frozenset({
+    "instance:fashion_brand",
+    "instance:fashion_house",
+    "extra",
+    "approved",
+})
 
 # Display-name normalisation, keyed by Q-ID. Wikidata often labels an item by its
 # legal/corporate name ("Levi Strauss & Co.", "The North Face, Inc.") or a
@@ -144,6 +157,39 @@ class UniverseItem:
     description: str
     sitelinks: int
     en_title: str  # "" if the brand has no English Wikipedia article
+    provenance: frozenset[str] = frozenset()
+
+
+def load_approved_qids(path: Path = APPROVED_FORCE_INCLUDE) -> frozenset[str]:
+    """Read human-approved benchmark force-includes, if the file exists."""
+    if not path.exists():
+        return frozenset()
+    import csv
+
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        return frozenset(
+            row.get("qid", "").strip()
+            for row in csv.DictReader(fh)
+            if row.get("qid", "").strip().startswith("Q")
+        )
+
+
+def is_viable(item: UniverseItem, approved_qids: frozenset[str] = frozenset()) -> bool:
+    """Apply the recall-safe entry gate while retaining sitelinks as a signal."""
+    if not item.label:
+        return False
+    return (
+        item.sitelinks > 0
+        or bool(item.provenance & HIGH_PRECISION_PROVENANCE)
+        or item.qid in EXTRA_QIDS
+        or item.qid in approved_qids
+    )
+
+
+def viable_items(
+    items: list[UniverseItem], approved_qids: frozenset[str] = frozenset()
+) -> list[UniverseItem]:
+    return [item for item in items if is_viable(item, approved_qids)]
 
 
 def build_root_query(prop: str, root_qid: str, keyword_filter: bool = False) -> str:
@@ -243,7 +289,7 @@ SELECT ?item ?itemLabel ?itemDescription ?sitelinks ?enTitle WHERE {{
 """
 
 
-def _row_to_item(row: dict) -> tuple[str, UniverseItem]:
+def _row_to_item(row: dict, provenance: str) -> tuple[str, UniverseItem]:
     qid = row["item"]["value"].rsplit("/", 1)[-1]
     # Show the consumer brand name where Wikidata labels the item by its corporate
     # or disambiguated form; fall back to the Wikidata label otherwise.
@@ -254,37 +300,73 @@ def _row_to_item(row: dict) -> tuple[str, UniverseItem]:
         description=row.get("itemDescription", {}).get("value", ""),
         sitelinks=int(row.get("sitelinks", {}).get("value", 0)),
         en_title=row.get("enTitle", {}).get("value", ""),
+        provenance=frozenset({provenance}),
     )
 
 
-def fetch_universe(client: SparqlClient, verbose: bool = False) -> list[UniverseItem]:
+def _merge_item(items: dict[str, UniverseItem], item: UniverseItem) -> bool:
+    """Insert an item or merge source provenance; return whether it was new."""
+    current = items.get(item.qid)
+    if current is None:
+        items[item.qid] = item
+        return True
+    items[item.qid] = replace(
+        current, provenance=current.provenance | item.provenance
+    )
+    return False
+
+
+def _root_provenance(prop: str, root_qid: str) -> str:
+    if prop == "P31":
+        labels = {
+            "Q1618899": "fashion_brand",
+            "Q1941779": "fashion_house",
+            "Q76213285": "clothing_store_chain",
+        }
+        return f"instance:{labels[root_qid]}"
+    if root_qid == "Q126793":
+        return "keyword_industry:retail"
+    return f"industry:{root_qid}"
+
+
+def fetch_universe(
+    client: SparqlClient, verbose: bool = False, *, deep: bool = False
+) -> list[UniverseItem]:
+    """Build the universe, optionally including human-approved monthly additions.
+
+    ``deep=False`` preserves the nightly query set.  The monthly reconciliation
+    passes ``deep=True`` so newly approved Q-IDs can be fetched there only.
+    """
     items: dict[str, UniverseItem] = {}
     for prop, root_qid, label, kw_filter in all_root_queries():
         rows = client.query(build_root_query(prop, root_qid, keyword_filter=kw_filter))
         added = 0
+        provenance = _root_provenance(prop, root_qid)
         for row in rows:
-            qid, item = _row_to_item(row)
-            if qid in items or qid in _ROOT_QIDS or qid in DROP_QIDS:
+            qid, item = _row_to_item(row, provenance)
+            if qid in _ROOT_QIDS or qid in DROP_QIDS:
                 continue
             # Drop non-fashion (toy/grocery/…) and defunct/closed brands from every
             # root — an attention index tracks live fashion brands.
             desc = item.description or ""
             if _EXCLUDE_DESC.search(desc) or _DEFUNCT_DESC.search(desc):
                 continue
-            items[qid] = item
-            added += 1
+            added += int(_merge_item(items, item))
         if verbose:
             print(f"  {prop:<5} {root_qid:<11} {label:<18} rows={len(rows):>5}  new={added:>5}  total={len(items)}")
 
     # Force-include the curated extras (mis-classified by Wikidata).
-    if EXTRA_QIDS:
-        extra_rows = client.query(build_values_query(EXTRA_QIDS))
+    approved_qids = load_approved_qids() if deep else frozenset()
+    force_qids = list(dict.fromkeys([*EXTRA_QIDS, *sorted(approved_qids)]))
+    if force_qids:
+        extra_rows = client.query(build_values_query(force_qids))
         added = 0
         for row in extra_rows:
-            qid, item = _row_to_item(row)
-            if qid not in items and qid not in DROP_QIDS:
-                items[qid] = item
-                added += 1
+            qid = row["item"]["value"].rsplit("/", 1)[-1]
+            provenance = "approved" if qid in approved_qids else "extra"
+            qid, item = _row_to_item(row, provenance)
+            if qid not in DROP_QIDS:
+                added += int(_merge_item(items, item))
         if verbose:
             print(f"  EXTRA {'(curated)':<11} {'force-include':<18} rows={len(extra_rows):>5}  new={added:>5}  total={len(items)}")
     return list(items.values())

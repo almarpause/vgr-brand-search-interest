@@ -89,20 +89,22 @@ def gather_signals(
     gstart, gend = window
     rows: list[dict] = []
     for n, item in enumerate(items, 1):
-        editions = editions_by_qid.get(item.qid, {})
-        monthly = _pv_monthly(editions, pv, window, cache_only)
-        pv_median, pv_recent, pv_total = pv_stats(monthly)
+        try:
+            editions = editions_by_qid.get(item.qid, {})
+            monthly = _pv_monthly(editions, pv, window, cache_only)
+            pv_median, pv_recent, pv_total = pv_stats(monthly)
 
-        gdelt_total: int | None = None
-        if gdelt is not None:
-            gdelt_total = gdelt.monthly_total(item.label, gstart, gend, cache_only=cache_only)
+            gdelt_total: int | None = None
+            if gdelt is not None:
+                gdelt_total = gdelt.monthly_total(
+                    item.label, gstart, gend, cache_only=cache_only, qid=item.qid,
+                )
 
-        reddit_vol: int | None = None
-        if reddit is not None:
-            reddit_vol = reddit.fetch(item.label, cache_only=cache_only)
+            reddit_vol: int | None = None
+            if reddit is not None:
+                reddit_vol = reddit.fetch(item.label, cache_only=cache_only)
 
-        rows.append(
-            {
+            row = {
                 "qid": item.qid,
                 "brand": item.label,
                 "description": item.description,
@@ -114,7 +116,21 @@ def gather_signals(
                 "gdelt_12mo": gdelt_total,
                 "reddit_vol": reddit_vol,
             }
-        )
+        except Exception as exc:
+            print(f"    [signals] skipped {item.qid} {item.label}: {exc}", flush=True)
+            row = {
+                "qid": item.qid,
+                "brand": item.label,
+                "description": item.description,
+                "sitelinks": item.sitelinks,
+                "en_title": item.en_title,
+                "pv_median": 0,
+                "pv_recent": 0.0,
+                "pv_12mo": 0,
+                "gdelt_12mo": None,
+                "reddit_vol": None,
+            }
+        rows.append(row)
         if verbose and (n % 200 == 0 or n == len(items)):
             print(f"    signals {n}/{len(items)}")
 

@@ -31,6 +31,7 @@ import httpx
 from .wikidata import USER_AGENT
 
 GDELT_API = "https://api.gdeltproject.org/api/v2/doc/doc"
+MAX_MIN_INTERVAL = 30.0
 
 
 def _to_dt(ts: str) -> datetime | None:
@@ -53,7 +54,22 @@ class GdeltClient:
         self._jitter = jitter
         self._max_retries = max_retries
         self._last_call = 0.0
+        self._giveups: list[dict[str, str]] = []
         self._client = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=60.0)
+
+    def record_giveup(self, qid: str, label: str) -> None:
+        """Remember a failed target for the caller's durable retry queue."""
+        target = {"qid": qid, "label": label}
+        if target not in self._giveups:
+            self._giveups.append(target)
+
+    def drain_targets(self) -> list[dict[str, str]]:
+        """Return and clear targets that exhausted retries in this run."""
+        targets, self._giveups = self._giveups, []
+        return targets
+
+    def _slow_down(self) -> None:
+        self._min_interval = min(MAX_MIN_INTERVAL, self._min_interval * 1.5)
 
     def _throttle(self) -> None:
         # Stagger requests: a base interval plus random jitter so bursts never
@@ -63,7 +79,10 @@ class GdeltClient:
         if wait > 0:
             time.sleep(wait)
 
-    def _get(self, params: dict, cache_key: str, cache_only: bool = False) -> dict | None:
+    def _get(
+        self, params: dict, cache_key: str, cache_only: bool = False,
+        giveup_target: tuple[str, str] | None = None,
+    ) -> dict | None:
         cache_file = self.cache_dir / f"{cache_key}.json"
         if cache_file.exists():
             return json.loads(cache_file.read_text(encoding="utf-8"))
@@ -72,10 +91,17 @@ class GdeltClient:
 
         for attempt in range(self._max_retries):
             self._throttle()
-            resp = self._client.get(GDELT_API, params=params)
-            self._last_call = time.monotonic()
+            try:
+                resp = self._client.get(GDELT_API, params=params)
+                self._last_call = time.monotonic()
+            except (httpx.TransportError, httpx.TimeoutException):
+                self._last_call = time.monotonic()
+                time.sleep(15 * (attempt + 1))
+                continue
 
             if resp.status_code == 429 or resp.status_code >= 500:
+                if resp.status_code == 429:
+                    self._slow_down()
                 retry_after = resp.headers.get("Retry-After")
                 back = float(retry_after) if (retry_after or "").isdigit() else 15 * (attempt + 1)
                 time.sleep(back)
@@ -95,11 +121,16 @@ class GdeltClient:
             return data
         # Persistent throttle: skip this brand this cycle rather than crash the
         # whole run. Nothing is cached, so a later night retries it.
+        self._slow_down()
+        if giveup_target is None:
+            label = str(params.get("query", cache_key)).strip('"')
+            giveup_target = ("", label)
+        self.record_giveup(*giveup_target)
         print(f"    [gdelt] gave up (throttled) on {cache_key}", flush=True)
         return None
 
     def fetch(self, query: str, start: str, end: str,
-              cache_only: bool = False) -> list[tuple[str, int]] | None:
+              cache_only: bool = False, *, qid: str = "") -> list[tuple[str, int]] | None:
         """Monthly raw article counts for `query` over [start, end] (YYYYMMDD).
 
         Returns [(YYYY-MM-01, count)] sorted by month, or **None** when the query
@@ -117,7 +148,10 @@ class GdeltClient:
         }
         digest = hashlib.sha256(f"{phrase}|{start}|{end}".encode("utf-8")).hexdigest()[:16]
         slug = "".join(c for c in query if c.isalnum())[:40]
-        data = self._get(params, f"{slug}_{start}_{end}_{digest}", cache_only=cache_only)
+        data = self._get(
+            params, f"{slug}_{start}_{end}_{digest}", cache_only=cache_only,
+            giveup_target=(qid, query),
+        )
         if data is None:
             return None            # not fetched -> ineligible
 
@@ -131,13 +165,15 @@ class GdeltClient:
                 monthly[f"{dt.year:04d}-{dt.month:02d}-01"] += int(round(val))
         return sorted(monthly.items())
 
-    def monthly_total(self, query: str, start: str, end: str, cache_only: bool = False) -> int | None:
+    def monthly_total(
+        self, query: str, start: str, end: str, cache_only: bool = False, *, qid: str = "",
+    ) -> int | None:
         """Total matching articles over the window (a scalar attention level).
 
         None = not fetched (throttled or, under cache_only, not cached) →
         ineligible. 0 = fetched, genuinely no coverage.
         """
-        series = self.fetch(query, start, end, cache_only=cache_only)
+        series = self.fetch(query, start, end, cache_only=cache_only, qid=qid)
         if series is None:
             return None
         return sum(v for _, v in series)

@@ -28,7 +28,13 @@ import pandas as pd
 from .normalize import combine_sources, sqrt_ratio_to_top5
 from .pageviews import PageviewsClient, trailing_12_month_window
 from .signals import gather_signals
-from .universe import SparqlClient, UniverseItem, fetch_universe
+from .universe import (
+    SparqlClient,
+    UniverseItem,
+    fetch_universe,
+    load_approved_qids,
+    viable_items,
+)
 from .wikidata import LANGUAGES, WikidataClient
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -165,16 +171,20 @@ def enrich_titles(df: pd.DataFrame, wd: WikidataClient) -> pd.DataFrame:
     return df
 
 
-def build_index(cache_only: bool = True, do_trends: bool = True, verbose: bool = True) -> pd.DataFrame:
+def build_index(
+    cache_only: bool = True, do_trends: bool = True, verbose: bool = True,
+    *, deep: bool = False,
+) -> pd.DataFrame:
     """End-to-end: universe -> signals (from cache) -> scored, ranked full pool."""
     window = trailing_12_month_window(date.today())
     if verbose:
         print(f"Interest run — trailing-12mo window {window[0]}..{window[1]}")
 
     sp = SparqlClient(CACHE / "sparql")
-    items = fetch_universe(sp)
+    items = fetch_universe(sp, deep=deep)
     sp.close()
-    viable = [i for i in items if i.sitelinks > 0 and i.label]
+    approved_qids = load_approved_qids() if deep else frozenset()
+    viable = viable_items(items, approved_qids)
     if verbose:
         print(f"  universe {len(items)}; viable {len(viable)}")
 

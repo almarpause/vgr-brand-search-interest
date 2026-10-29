@@ -67,12 +67,20 @@ class PageviewsClient:
         if cache_only:
             return None            # scoring pass: never hit the network
 
+        last_failure_transport = False
         for attempt in range(self._max_retries):
             wait = self._min_interval - (time.monotonic() - self._last_call)
             if wait > 0:
                 time.sleep(wait)
-            resp = self._client.get(url)
-            self._last_call = time.monotonic()
+            try:
+                resp = self._client.get(url)
+                self._last_call = time.monotonic()
+            except (httpx.TransportError, httpx.TimeoutException):
+                self._last_call = time.monotonic()
+                time.sleep(2 * (attempt + 1))
+                last_failure_transport = True
+                continue
+            last_failure_transport = False
 
             # 404 = the article has no pageview data for that range. A real
             # 'zero signal' answer, not an error — cache an empty result.
@@ -89,6 +97,9 @@ class PageviewsClient:
             data = resp.json()
             cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             return data
+        if last_failure_transport:
+            print(f"    [pageviews] gave up (transport error) on {url}", flush=True)
+            return {"items": []}
         raise RuntimeError(f"pageviews API kept throttling after {self._max_retries} retries: {url}")
 
     def fetch(

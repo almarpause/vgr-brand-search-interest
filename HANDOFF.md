@@ -188,7 +188,10 @@ Hugo Boss, Shein, Victoria's Secret.** Tiers ≈ A 24 / B 99 / C 377.
 ## 7. Scheduling (Windows Task Scheduler, `schedule/`)
 
 - **VBI-FetchNightly** — daily 02:30 → `fetch_nightly.bat` (one shard).
-- **VBI-Monthly** — 1st 04:00 → `run_monthly.bat` (assemble + email).
+- **VBI-Monthly** — 1st 06:00 → `run_monthly.bat` (assemble + email). Moved from
+  04:00 (2026-10-29) so it starts after even a slow nightly finishes; combined
+  with the in-code nightly lock (§11) the monthly can no longer read a
+  half-written shard.
 - **VBI-Overnight**, **VBI-Campaign-Test**, **VBI-Assemble-Test** — one-time,
   already fired = **spent; delete them** (`schtasks /Delete /TN <name> /F`).
 - `.bat` launchers use `.venv\Scripts\python.exe`; `register_schedule.ps1` /
@@ -211,6 +214,24 @@ tasks was proposed but **not built**.
 
 ## 8. Open items / TODO
 
+- **Next action — approve (or decline) 4 benchmark brands into the roster.** The
+  monthly benchmark reconciliation (see §10) found Chanel (Q218115), Dior
+  (Q542767), Coach (Q727697) and Khaite (Q136953861) on the Lyst Q3-26 list but
+  NOT in the tracked 500 — they were misclassified in Wikidata (e.g. Dior as a
+  "business"/organization) so the ontology roots missed them. They are proposed in
+  `refresh_500/benchmarks/force_include_proposal.csv`. Adding them reshuffles ranks,
+  so it needs **Pau's explicit go-ahead**: approve by copying rows into
+  `force_include_approved.csv` (see §10 / that folder's README). Nothing enters the
+  index until then.
+- **Committed 2026-10-29 (local `master`, not pushed).** The nightly-resilience
+  hardening (§11) and the benchmark-recall layer (§10) went in as one code commit
+  — source + tests + HANDOFF only; the data/output churn (dashboard, JSON, history
+  parquet, refreshed CSV) and the trends-campaign scratch files were left out.
+  `pytest -q` = 20 pass. Push is still pending Pau's go-ahead (coordinate with the
+  trends-campaign session and the auto-sync from SURFACE3).
+- **proj-brand-index health check is NOT a registered scheduled task** — it is only
+  a "suggested daily 08:00" skill. Until it's scheduled, the monthly email is the
+  only channel that surfaces a coverage miss. Decide whether to register it.
 - **Delete the 3 spent one-time tasks** (VBI-Overnight / -Campaign-Test / -Assemble-Test).
 - Optionally **clear the 228 orphaned `cache/trends/batch_*`** (raw-term).
 - **Google Search** fills only via the nightly (weeks) — Google blocks bulk.
@@ -238,3 +259,100 @@ To refresh the dashboard artifact: strip `output/dashboard.html` from `<title>`
 to the last `</script>`, drop `</head>`/`<body>`, and republish that fragment to
 the SAME artifact URL.
 </content>
+
+## Surgery 2 (22 Sep 2026): 500 distinct brands
+`refresh_500/surgery2.py`. Run order: `merge_and_rebuild.py` -> `surgery2.py apply` -> `dashboard.py` (surgery 1 rebuilds from the pre-surgery baseline, so surgery 2 must follow it).
+- Removed duplicate items: Max Mara Q110225120, Cotton On Q5175717, Kapital Q11297188, Tailored Brands Q3305660. Removed non-brands: streetwear Q2072372, garment factory Q55748823.
+- Added: Tous Q3815128, DeFacto Q6059861, Cold Culture Q138573425 (pageviews only so far), and Halara, Scuffers, Blue Banana (keys VGR-HALARA / VGR-SCUFFERS / VGR-BLUEBANANA, no Wikidata item, score 0 until Trends and News are collected into `trends_stagger/items/<key>.csv`).
+- Result: 500 rows, 500 distinct names, basket unchanged. The same 500 is the social-leaders roster.
+- Not committed or pushed. Push only with Pau's go-ahead, coordinated with the trends campaign session.
+
+---
+
+## 10. Benchmark recall layer — the brand-discovery safety net (Oct 2026)
+
+**Problem it solves.** The universe is discovered by Wikidata ontology roots, which
+miss two kinds of relevant brand: (A) houses **misclassified** in Wikidata so they
+escape the fashion roots (Chanel, Coach, Dior all carry "business"/organization
+P31s), and (B) correctly-classed brands with **0 Wikipedia sitelinks** dropped by
+the `sitelinks>0` viability gate (e.g. Dries Van Noten). Industry lists like the
+**Lyst Index** name exactly these brands, so they are the ground truth we check
+against.
+
+**How it works (monthly, staggered — NOT daily).**
+- `src/vgr_brand_index/benchmark_reconcile.py` — `run_reconciliation(offline, keyword_rescue)`
+  compares every benchmark CSV in `refresh_500/benchmarks/` against the built
+  universe, resolves names → Q-IDs (cached in `name_to_qid.json`), and writes
+  `force_include_proposal.csv` (missing brands) + `needs_manual_confirmation.csv`
+  (ambiguous names). `assert_benchmark_coverage()` fails until each benchmark brand
+  is either in the universe or in `force_include_approved.csv`.
+- Viability was centralised in `universe.viable_items(items, approved_qids)`: a
+  0-sitelink item now survives if it is a fashion brand/house, in `EXTRA_QIDS`, or
+  in the **approved** benchmark set. `interest.build_index(..., deep=True)` loads
+  the approved Q-IDs on the **monthly** path only; the nightly path stays strict.
+- `run_monthly.reconcile_benchmarks()` runs after the report is built, wrapped so a
+  coverage/API failure can never block the report or its email. When something needs
+  action it returns an email-ready notice; `emailer.send_report(..., notice=...)`
+  folds it into the monthly email as an **"Action needed — brand coverage"** block
+  and adds " · action needed" to the subject. **The email is the reliable
+  follow-up channel** (the health-check skill isn't scheduled).
+- `discover_keyword_rescue()` / `--keyword-rescue` is an opt-in CirrusSearch sweep
+  for fashion-described brands the benchmarks don't name. **Not** wired into the
+  monthly job; validate precision before enabling.
+
+**The approval loop (this is "followed up"):**
+`VBI-Monthly` proposes → the monthly email tells Pau → Pau copies chosen rows from
+`force_include_proposal.csv` into `force_include_approved.csv` (adds `approved_by`,
+`approved_date`) and commits → the brand joins the index on the next rebuild; the
+coverage test goes green. Full description: `refresh_500/benchmarks/README.md`.
+
+**Status:** built, `pytest -q` = 20 pass, committed 2026-10-29 (see §8). The 4 Lyst
+brands above are proposed and awaiting Pau (see §8).
+
+> Engine note (per CLAUDE.md routing): the token-heavy multi-file build + tests
+> were delegated to **Codex**; Claude did the planning, review, the test run Codex's
+> sandbox blocked, and the email-notice wiring.
+
+---
+
+## 11. Nightly-fetch resilience (hardened 2026-10-29)
+
+**Why.** The 2026-10-29 nightly (shard 0) died ~05:01 on a single
+`httpx.ConnectTimeout` from GDELT: `_get` handled 429/5xx but not transport
+errors, so one brand's timeout ended the whole run (rc=1) and the rest of the
+shard never ran. Separately, every throttled GDELT brand used to wait a full
+28-day cycle for its shard to come round again, so a large slice of the index
+carried no news signal.
+
+**What changed (one commit; engine note: delegated to Codex per CLAUDE.md, Claude
+reviewed + ran the tests Codex's sandbox blocked).**
+- **Transport errors never end the run.** `gdelt._get` and `pageviews._get` now
+  catch `httpx.TransportError`/`TimeoutException`, back off and retry. GDELT gives
+  up like a throttle (logs, records the brand, returns None). Pageviews is the
+  backbone so it still *raises* on persistent 429/5xx, but a persistent transport
+  error returns an empty result (brand misses that edition) instead of crashing.
+  `signals.gather_signals` also wraps each brand so one exception can't abort the
+  loop — the brand gets a null row and is simply ineligible.
+- **GDELT backlog + end-of-run retry + adaptive rate.** Throttled/failed GDELT
+  brands are persisted to `cache/gdelt_backlog.json`; each night drains up to
+  `BACKLOG_BUDGET = 40` of them before the shard, drops ones that recover, bumps
+  `attempts`, and permanently drops at `attempts >= BACKLOG_ATTEMPTS_CAP (6)`.
+  After the shard it retries this shard's still-missing GDELT once more with a
+  now-slower client. The client self-slows (`min_interval ×1.5`, cap 30s) under
+  429/give-up.
+- **Honest coverage + rc.** `main()` prints `coverage — pv X/N, gdelt Y/N,
+  reddit Z/N, trends(batch) T, backlog B` and returns 1 only on a real failure
+  (uncaught exception, or a non-empty shard with pv coverage 0). Partial
+  gdelt/reddit/trends is normal, not a failure.
+- **Monthly can't read a half shard.** `fetch_nightly` writes `logs/nightly.lock`
+  (+ `logs/nightly_status.json`) at start and clears the lock in a `finally`.
+  `run_monthly.wait_for_nightly()` waits up to 60 min for a fresh lock to clear;
+  if it's stale (>4h) or times out it proceeds anyway and appends a gap line to
+  the monthly email notice — the monthly always completes and emails. The 06:00
+  start (§7) means this almost never has to wait.
+- **Test:** `tests/test_nightly_resilience.py` — GDELT ConnectTimeout → give-up,
+  not raise; pageviews ConnectTimeout → `[]`, not raise; a raising gdelt → the
+  brand still lands with a null signal.
+
+New constants/paths: `BACKLOG_BUDGET`, `BACKLOG_ATTEMPTS_CAP`,
+`cache/gdelt_backlog.json`, `logs/nightly.lock`, `logs/nightly_status.json`.

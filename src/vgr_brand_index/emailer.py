@@ -43,10 +43,13 @@ def load_smtp(cfg: dict) -> dict:
     return s
 
 
-def render(top: pd.DataFrame, d: Deltas, prefix: str) -> tuple[str, str, str]:
+def render(top: pd.DataFrame, d: Deltas, prefix: str,
+           notice: str | None = None) -> tuple[str, str, str]:
     ml = month_label(d.month)
     lead = top.iloc[0]
     subject = f"{prefix} — {ml}: {lead['brand']} leads"
+    if notice:
+        subject += " · action needed"
 
     def li(rows):
         return "".join(
@@ -61,6 +64,18 @@ def render(top: pd.DataFrame, d: Deltas, prefix: str) -> tuple[str, str, str]:
     if d.has_prior and d.top_risers:
         movers_html = f"<h3 style='font-family:Arial'>Biggest risers</h3><ul>{li(d.top_risers[:5])}</ul>"
 
+    notice_html = ""
+    if notice:
+        safe = (notice.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\n", "<br>"))
+        notice_html = (
+            "<div style=\"font-family:Arial;font-size:13px;color:#1A1A1A;"
+            "background:#FBF3E7;border-left:3px solid #C0110A;padding:10px 12px;"
+            "margin:14px 0;border-radius:2px\">"
+            "<b style='color:#C0110A'>Action needed — brand coverage</b><br>"
+            f"{safe}</div>"
+        )
+
     html = f"""<div style="font-family:Georgia,serif;color:#1A1A1A;max-width:640px">
       <p style="font-family:Arial;color:#C0110A;font-weight:bold;letter-spacing:1px">VGR · BRAND INDEX</p>
       <h2 style="margin:0 0 6px">{ml}</h2>
@@ -68,15 +83,19 @@ def render(top: pd.DataFrame, d: Deltas, prefix: str) -> tuple[str, str, str]:
       (top-5 average = 100). A tier {int(counts.get('A',0))}, B tier {int(counts.get('B',0))},
       C tier {int(counts.get('C',0))}.</p>
       {movers_html}
+      {notice_html}
       <p style="font-family:Arial;font-size:12px;color:#5A6A7A">Full report attached (.docx).
       Sources: Wikipedia, GDELT, Google Trends, Wikidata. Not investment advice.</p>
     </div>"""
     text = (f"VGR Brand Search Interest — {ml}\n{lead['brand']} leads at {lead['interest_index']:.0f} "
             f"(top-5=100). See attached report.")
+    if notice:
+        text += "\n\n--- Action needed — brand coverage ---\n" + notice
     return subject, text, html
 
 
-def send_report(docx_path: Path, top: pd.DataFrame, d: Deltas) -> int:
+def send_report(docx_path: Path, top: pd.DataFrame, d: Deltas,
+                notice: str | None = None) -> int:
     cfg = load_settings()
     recipients = cfg.get("recipients") or []
     if not recipients:
@@ -86,7 +105,8 @@ def send_report(docx_path: Path, top: pd.DataFrame, d: Deltas) -> int:
     if missing:
         print(f"    [email] missing SMTP settings: {missing}"); return 1
 
-    subject, text, html = render(top, d, cfg.get("subject_prefix", "VGR Brand Search Interest"))
+    subject, text, html = render(top, d, cfg.get("subject_prefix", "VGR Brand Search Interest"),
+                                 notice=notice)
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = smtp["from"]
