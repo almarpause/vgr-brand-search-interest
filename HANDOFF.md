@@ -227,8 +227,8 @@ tasks was proposed but **not built**.
   hardening (§11) and the benchmark-recall layer (§10) went in as one code commit
   — source + tests + HANDOFF only; the data/output churn (dashboard, JSON, history
   parquet, refreshed CSV) and the trends-campaign scratch files were left out.
-  `pytest -q` = 20 pass. Push is still pending Pau's go-ahead (coordinate with the
-  trends-campaign session and the auto-sync from SURFACE3).
+  `pytest -q` = 20 pass; pushed to `origin/master` 2026-10-29 (rebased onto the
+  SURFACE3 "align README" commit — disjoint files, no conflict).
 - **proj-brand-index health check is NOT a registered scheduled task** — it is only
   a "suggested daily 08:00" skill. Until it's scheduled, the monthly email is the
   only channel that surfaces a coverage miss. Decide whether to register it.
