@@ -1,0 +1,12 @@
+ts,key,label,status,exit_code,note
+17:45:50,Q17141914,Scotch & Soda,ok,0,
+18:04:17,Q3878818,Charles & Keith,ok,0,
+18:04:23,Q688195,Bally,ok,0,
+18:06:37,Q3645582,Brunello Cucinelli,ok,0,
+18:48:32,Q60772401,COS,ok,0,
+19:18:44,Q65090803,Fashion Nova,ok,0,
+19:50:25,Q122055705,Polène,ok,0,
+19:51:30,Q124984211,Nude Project,block,1,\b429\b
+21:57:21,Q124984211,Nude Project,block,1,\b429\b
+04:32:19,Q124984211,Nude Project,block,1,\b429\b
+09:59:07,Q124984211,Nude Project,block,1,\b429\b

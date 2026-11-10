@@ -1,0 +1,28 @@
+{
+  "name": "trends-adds",
+  "command": [
+    "python",
+    "C:/Users/aresi/Claude/code/brand-index/refresh_500/collect_one_trend.py",
+    "{qid}",
+    "--out",
+    "C:/Users/aresi/Claude/code/brand-index/refresh_500/trends_stagger/items/{safe}.csv"
+  ],
+  "items_file": "C:/Users/aresi/Claude/code/brand-index/refresh_500/trends_stagger/items_bottom_up.csv",
+  "item_format": "csv",
+  "key_field": "qid",
+  "display_field": "brand",
+  "batch_min": 1,
+  "batch_max": 1,
+  "gap_min": 45,
+  "gap_max": 75,
+  "max_hours": 10,
+  "stop_on_block": true,
+  "per_item_timeout": 300,
+  "ok_requires": ["RESULT_OK"],
+  "block_patterns": [
+    "RATE_LIMIT_BLOCK", "HTTP ?429", "\\b429\\b", "rate.?limit",
+    "too many requests", "unusual traffic", "captcha", "recaptcha",
+    "access denied", "forbidden", "blocked", "throttl", "kept failing"
+  ],
+  "out_dir": "C:/Users/aresi/Claude/code/brand-index/refresh_500/trends_stagger"
+}
