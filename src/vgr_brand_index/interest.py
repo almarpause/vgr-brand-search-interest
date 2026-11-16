@@ -121,6 +121,27 @@ def score_universe(signals: pd.DataFrame, weights: dict[str, float] | None = Non
         if int(elig[s].sum()) < min_cov:
             elig[s] = pd.Series(False, index=df.index)
 
+    # Existence-anchor gate. Pageviews are keyed on the Wikidata Q-ID (all
+    # Wikipedia editions), so a pageview value is unambiguously about THIS brand
+    # and only exists for an entity notable enough to have an article. Every other
+    # source is matched more loosely and is noisy on its own:
+    #   * Trends resolves a name to a topic mid, which MIS-resolves for generic or
+    #     short names — "Alma", "Ladies", "Australian", "Away", "GU" resolve to huge
+    #     unrelated search topics and would otherwise rank in the top 50 with pv=0.
+    #   * News / Reddit match on the brand STRING, so common-word names ("ONLY",
+    #     "Guess", "'47") accrue large, meaningless volume.
+    # So pageviews are the required anchor: Trends, News and Reddit may only
+    # *contribute* to a brand that also has pageviews; they can never, alone, carry
+    # a pv=0 brand into the ranking. This is the single biggest fix for the
+    # "sometimes Nike, sometimes nonsense" instability. (Genuinely emerging brands
+    # with no Wikipedia article are recovered via discovery + Meta/TikTok signals,
+    # not via a mis-resolved Trends/Reddit value.)
+    if "pv" in DYNAMIC_SOURCES:
+        has_pv = elig["pv"].astype(bool)
+        for s in DYNAMIC_SOURCES:
+            if s != "pv":
+                elig[s] = elig[s] & has_pv
+
     # store the normalised per-source ratio under a distinct name — never reuse a
     # raw column name (e.g. 'trends_score'), which would clobber the raw value.
     # 'sources' reflects what actually contributed (post coverage-gate); computed
@@ -212,6 +233,8 @@ def build_index(
 
 
 def main() -> int:
+    from .config import force_utf8_stdio
+    force_utf8_stdio()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     df = build_index(cache_only=True, do_trends=True, verbose=True)
 

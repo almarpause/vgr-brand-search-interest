@@ -52,6 +52,8 @@ def _top_labels(top_n: int) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .config import force_utf8_stdio
+    force_utf8_stdio()
     ap = argparse.ArgumentParser(description="Overnight staggered fetch of all signals.")
     ap.add_argument("--top", type=int, default=600, help="how many top brands (by pageviews) to fetch")
     ap.add_argument("--hours", type=float, default=None,

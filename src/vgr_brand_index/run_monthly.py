@@ -127,6 +127,8 @@ def reconcile_benchmarks() -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .config import force_utf8_stdio
+    force_utf8_stdio()
     ap = argparse.ArgumentParser(description="Assemble the monthly shot and report.")
     ap.add_argument("--month", default=current_month(), help="YYYY-MM (default: this month)")
     ap.add_argument("--dry-run", action="store_true", help="build everything, send no email")

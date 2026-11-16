@@ -40,6 +40,13 @@ def _is_ambiguous_name(label: str) -> bool:
     t = str(label).strip().lower()
     if " " in t or "-" in t:          # multi-word names are unambiguous enough
         return False
+    # Very short single tokens ("GU", "AG", "Y3") are too short for a string search
+    # or a Trends topic to resolve reliably — they collide with acronyms, game terms
+    # and non-Latin homographs, inflating the signal wildly (e.g. GU's Trends came
+    # back at 75x Gucci). Drop the string/topic sources for them; they still rank on
+    # pageviews, which are Q-ID-keyed and unambiguous.
+    if len(t.replace("'", "").replace(".", "")) <= 2:
+        return True
     return t in _COMMON_WORD_BRANDS
 
 
@@ -136,13 +143,18 @@ def gather_signals(
 
     df = pd.DataFrame(rows).set_index("qid")
 
-    # Trends is batched (anchor-chained). Batch in pageviews-descending order so
-    # the highest-attention brands land in the earliest batches (fetched first)
-    # and the batch/cache keys are stable across runs.
+    # Trends is anchor-chained in batches, and a batch's cache key IS its ordered
+    # token list — so the fetch pass and the scoring pass MUST batch in the exact
+    # same order or every cached batch is orphaned and Trends silently scores 0
+    # (which is what happened). The nightly fetch batches in the universe's natural
+    # order (`[i.label for i in viable]`), so score in that same order — i.e. the
+    # items' order, which is this frame's natural (unsorted) order. It is also
+    # independent of pageviews, so batch keys stay valid month to month instead of
+    # drifting every time pv changes.
     trends_by_label: dict[str, float | None] = {}
     if trends is not None and do_trends:
-        labels_pv_desc = df.sort_values("pv_12mo", ascending=False)["brand"].tolist()
-        trends_by_label = trends.score_brands(labels_pv_desc, cache_only=cache_only)
+        labels_stable = df["brand"].tolist()
+        trends_by_label = trends.score_brands(labels_stable, cache_only=cache_only)
     df["trends_score"] = df["brand"].map(lambda b: trends_by_label.get(b))
 
     # Eligibility: a source counts for a brand only when it returned a real value.

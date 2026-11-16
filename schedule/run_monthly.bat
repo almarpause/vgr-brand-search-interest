@@ -8,6 +8,10 @@ if not exist "%VBI_ROOT%\logs" mkdir "%VBI_ROOT%\logs"
 set "STAMP=%DATE:/=-%_%TIME::=-%"
 set "LOG=%VBI_ROOT%\logs\monthly_%STAMP: =0%.log"
 set "PY=%VBI_ROOT%\.venv\Scripts\python.exe"
+REM Force UTF-8 so printing accented brand names (Hermès, Façonnable…) can't crash
+REM the run under the scheduler's legacy cp1252 console (see force_utf8_stdio).
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 if not exist "%PY%" (
   echo [task] venv python not found at %PY%>>"%LOG%"

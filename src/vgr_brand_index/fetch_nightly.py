@@ -76,6 +76,8 @@ def _remove_own_lock(pid: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .config import force_utf8_stdio
+    force_utf8_stdio()
     pid = os.getpid()
     clients = []
     lock_written = False
