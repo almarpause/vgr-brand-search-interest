@@ -33,21 +33,53 @@ _COMMON_WORD_BRANDS = {
     "bench", "supreme", "stadium", "mango", "mark", "marks", "reserved", "champion",
     "element", "obey", "everyday", "common", "pull", "off", "true", "life", "diesel",
     "weekday", "quiet", "case", "born",
+    # Generic single words whose Google-Trends topic mid mis-resolves to a huge
+    # unrelated entity (observed in the top 50 when the pageviews gate was loosened).
+    # Stripping their string/topic sources leaves them to rank on pageviews alone.
+    "alma", "ladies", "away", "australian", "island", "blue", "george", "about",
+    "only", "you",
+}
+
+# Legal-entity / corporate-form suffixes. A brand entered under its holding or
+# legal name ("Adidas AG", "Blue Inc", "Island Company") has no Wikipedia
+# pageviews of its own — those sit under the brand's common name — and its Trends /
+# Reddit queries resolve to the parent company or the ordinary word. So the
+# string/topic sources are drop-only for these; a real-attention corporate name is
+# unaffected because pageviews are never gated by ambiguity (elig_pv ignores amb).
+_CORP_SUFFIXES = {
+    "ag", "sa", "nv", "plc", "gmbh", "inc", "corp", "corporation", "ltd", "limited",
+    "llc", "group", "holding", "holdings", "company", "bv", "spa", "srl", "kgaa",
+    "sas", "oyj",
 }
 
 
 def _is_ambiguous_name(label: str) -> bool:
     t = str(label).strip().lower()
-    if " " in t or "-" in t:          # multi-word names are unambiguous enough
+    if " " not in t and "-" not in t:
+        # Very short single tokens ("GU", "AG", "Y3") are too short for a string
+        # search or a Trends topic to resolve reliably — they collide with acronyms,
+        # game terms and non-Latin homographs, inflating the signal wildly (e.g.
+        # GU's Trends came back at 75x Gucci). Drop the string/topic sources; they
+        # still rank on pageviews, which are Q-ID-keyed and unambiguous.
+        core = t.replace("'", "").replace(".", "")
+        if len(core) <= 2:
+            return True
+        return t in _COMMON_WORD_BRANDS
+    # Multi-word names: judge by COMPOSITION, not by having a space. A name that
+    # ends in a legal-entity suffix is the corporate/holding form (it mis-resolves
+    # to the parent topic or is a registry duplicate of the common name); a name
+    # whose every token is an ordinary word can't be told from language ("About
+    # You", "Blue Inc"). Distinctive multi-word brands (Louis Vuitton, Air Jordan)
+    # have no common/suffix tokens and pass through untouched.
+    toks = [w for w in t.replace("-", " ").replace(".", "").split() if w]
+    if not toks:
         return False
-    # Very short single tokens ("GU", "AG", "Y3") are too short for a string search
-    # or a Trends topic to resolve reliably — they collide with acronyms, game terms
-    # and non-Latin homographs, inflating the signal wildly (e.g. GU's Trends came
-    # back at 75x Gucci). Drop the string/topic sources for them; they still rank on
-    # pageviews, which are Q-ID-keyed and unambiguous.
-    if len(t.replace("'", "").replace(".", "")) <= 2:
+    if toks[-1] in _CORP_SUFFIXES:
         return True
-    return t in _COMMON_WORD_BRANDS
+    generic = _COMMON_WORD_BRANDS | _CORP_SUFFIXES
+    if all(w in generic for w in toks):
+        return True
+    return False
 
 
 def _pv_monthly(

@@ -66,6 +66,14 @@ SOURCE_WEIGHTS = {"pv": 0.55, "trends": 0.45, "gdelt": 0.03, "reddit": 0.02}
 # The dynamic attention sources that form the composite.
 DYNAMIC_SOURCES = ["pv", "gdelt", "trends", "reddit"]
 
+# trends_score is anchor-scaled (the Adidas anchor ≈ 100). A real fashion brand
+# cannot plausibly command several times the anchor's worldwide search, so a value
+# far above it is a topic-mid MIS-RESOLUTION (a short/generic name — "GU" came back
+# at ~1533 — resolving to a huge unrelated entity). Above this cap the brand's
+# Trends signal is dropped (marked ineligible) rather than allowed to carry a rank.
+# This is what lets us loosen the pageviews requirement without the junk returning.
+TRENDS_PLAUSIBLE_MAX = 300.0
+
 # Parent groups / holding companies. The VGR rule is that global groups are
 # decomposed to banners and never appear as their own brand row. We FLAG rather
 # than drop, so the exclusion decision stays with the human review.
@@ -111,6 +119,13 @@ def score_universe(signals: pd.DataFrame, weights: dict[str, float] | None = Non
     scores = {s: sqrt_ratio_to_top5(df[raw_cols[s]].astype(float).fillna(0.0)) for s in DYNAMIC_SOURCES}
     elig = {s: df[f"elig_{s}"].astype(bool) for s in DYNAMIC_SOURCES}
 
+    # Trends plausibility cap: an anchor-scaled trends_score far above the anchor is
+    # a mis-resolution, not a real brand. Drop it so it can neither carry a rank nor
+    # act as the clean anchor below. Works on the cached values (no re-fetch needed).
+    if "trends" in DYNAMIC_SOURCES:
+        implausible = df["trends_score"].astype(float) > TRENDS_PLAUSIBLE_MAX
+        elig["trends"] = elig["trends"] & ~implausible.fillna(False)
+
     # Coverage gate: a source only counts once enough brands carry it. With just a
     # handful eligible (ramp-up, or a throttled night), the sqrt-ratio-to-top-5 is
     # taken over a near-empty distribution and those few brands max out, distorting
@@ -121,26 +136,24 @@ def score_universe(signals: pd.DataFrame, weights: dict[str, float] | None = Non
         if int(elig[s].sum()) < min_cov:
             elig[s] = pd.Series(False, index=df.index)
 
-    # Existence-anchor gate. Pageviews are keyed on the Wikidata Q-ID (all
-    # Wikipedia editions), so a pageview value is unambiguously about THIS brand
-    # and only exists for an entity notable enough to have an article. Every other
-    # source is matched more loosely and is noisy on its own:
-    #   * Trends resolves a name to a topic mid, which MIS-resolves for generic or
-    #     short names — "Alma", "Ladies", "Australian", "Away", "GU" resolve to huge
-    #     unrelated search topics and would otherwise rank in the top 50 with pv=0.
-    #   * News / Reddit match on the brand STRING, so common-word names ("ONLY",
-    #     "Guess", "'47") accrue large, meaningless volume.
-    # So pageviews are the required anchor: Trends, News and Reddit may only
-    # *contribute* to a brand that also has pageviews; they can never, alone, carry
-    # a pv=0 brand into the ranking. This is the single biggest fix for the
-    # "sometimes Nike, sometimes nonsense" instability. (Genuinely emerging brands
-    # with no Wikipedia article are recovered via discovery + Meta/TikTok signals,
-    # not via a mis-resolved Trends/Reddit value.)
-    if "pv" in DYNAMIC_SOURCES:
-        has_pv = elig["pv"].astype(bool)
-        for s in DYNAMIC_SOURCES:
-            if s != "pv":
-                elig[s] = elig[s] & has_pv
+    # Clean-anchor gate. We do NOT require Wikipedia pageviews — a brand with no
+    # article can still rank, so genuinely emerging / non-notable brands are not shut
+    # out. But a brand must have at least one ENTITY-DISAMBIGUATED (clean) source to
+    # anchor it: pageviews (keyed on the Wikidata Q-ID) OR Google Trends (keyed on a
+    # topic mid, after the plausibility cap above has removed mis-resolutions). The
+    # STRING-match sources — News and Reddit — match on the brand name, so a common
+    # word ("ONLY", "Guess", "'47") or a short/ambiguous name accrues large,
+    # meaningless volume; they may only *contribute* to a brand that already has a
+    # clean source, never carry one into the ranking alone. This blocks the
+    # reddit/gdelt-only non-brands while leaving trends-anchored brands free to rank.
+    clean_sources = [s for s in ("pv", "trends") if s in DYNAMIC_SOURCES]
+    string_sources = [s for s in ("gdelt", "reddit") if s in DYNAMIC_SOURCES]
+    if clean_sources and string_sources:
+        has_clean = elig[clean_sources[0]].copy()
+        for s in clean_sources[1:]:
+            has_clean = has_clean | elig[s]
+        for s in string_sources:
+            elig[s] = elig[s] & has_clean
 
     # store the normalised per-source ratio under a distinct name — never reuse a
     # raw column name (e.g. 'trends_score'), which would clobber the raw value.
