@@ -16,6 +16,7 @@ Missing signals remain missing and weights renormalize within each dimension.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from pathlib import Path
 
@@ -117,9 +118,14 @@ def build_raw_signals(frame: pd.DataFrame) -> pd.DataFrame:
     raw["wiki_pageviews"] = _first_column(frame, ["pv_level", "wiki_pageviews_level", "pv_median"])
     raw["google_trends"] = _first_column(frame, ["google_trends_level", "trends_level", "trends_score"])
     raw["reddit"] = _first_column(frame, ["reddit_level", "reddit_volume", "reddit_vol"])
-    gdelt_volume = _first_column(frame, ["gdelt_level", "gdelt_volume", "gdelt_12mo"])
+    gdelt_volume = _first_column(frame, ["gdelt_volume", "gdelt_12mo", "gdelt_level"])
+    gdelt_level = _first_column(frame, ["gdelt_level", "gdelt_volume", "gdelt_12mo"])
     gdelt_tone = _first_column(frame, ["gdelt_tone"]).fillna(0.0)
-    raw["gdelt_tone_adj"] = gdelt_volume * (1.0 + gdelt_tone / 10.0).clip(0.3, 1.0)
+    tone_factor = (1.0 + gdelt_tone / 10.0).clip(0.3, 1.0)
+    # Literal methodology audit field; the recency-weighted analogue below is
+    # what drives the two level/now lenses.
+    raw["gdelt_tone_adj_volume"] = gdelt_volume * tone_factor
+    raw["gdelt_tone_adj"] = gdelt_level * tone_factor
     raw["tiktok_hashtag"] = _first_column(frame, ["tiktok_level", "tiktok_hashtag", "tiktok_views"])
     raw["editorial_authority"] = (
         _first_column(frame, ["ed_count"]).clip(upper=4).fillna(0.0)
@@ -159,6 +165,11 @@ def score_dimensions(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[
     out["heat"] = pd.concat(parts, axis=1).sum(axis=1, min_count=len(W))
     out["heat_level"] = out["heat"]
     out["heat_now"] = out["heat"]
+    for name in W:
+        out[name.capitalize()] = out[name]
+    out["HEAT"] = out["heat"]
+    out["HEAT_level"] = out["heat_level"]
+    out["HEAT_now"] = out["heat_now"]
 
     momentum_cols = [c for c in out if c.endswith("_momentum")]
     if momentum_cols:
@@ -197,8 +208,11 @@ def apply_movement(
     return out
 
 
-def _incumbent_qids() -> set[str]:
-    path = ROOT / "output" / "index_500.csv"
+def _incumbent_qids(month: str | None = None) -> set[str]:
+    previous_path = (
+        METRICS_ROOT / _previous_month(month) / "published_500.csv" if month else None
+    )
+    path = previous_path if previous_path and previous_path.exists() else ROOT / "output" / "index_500.csv"
     if not path.exists():
         return set()
     frame = pd.read_csv(path, encoding=CSV_ENCODING, dtype={"qid": str})
@@ -221,11 +235,34 @@ def load_keepers(path: Path | None) -> set[str]:
             if line.strip() and not line.lstrip().startswith("#")}
 
 
-def select_published(scored: pd.DataFrame, keepers: set[str]) -> pd.DataFrame:
+def scratchpad_keepers() -> set[str]:
+    """Read a literal KEEP collection from merge_select.py, when it exists."""
+    candidates = (
+        ROOT / "scratchpad" / "merge_select.py",
+        ROOT / "output" / "scratchpad" / "merge_select.py",
+        ROOT / "merge_select.py",
+    )
+    for path in candidates:
+        if not path.exists():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(isinstance(target, ast.Name) and target.id == "KEEP" for target in targets):
+                    value = ast.literal_eval(node.value)
+                    return {str(item).strip() for item in value if str(item).strip()}
+    return set()
+
+
+def select_published(
+    scored: pd.DataFrame, keepers: set[str], incumbents: set[str] | None = None,
+) -> pd.DataFrame:
     out = scored.copy()
-    incumbents = _incumbent_qids()
+    incumbents = _incumbent_qids() if incumbents is None else incumbents
     out["in_pub500"] = out["qid"].astype(str).isin(incumbents).astype(int)
     out["select_score"] = out["heat_level"] + 4.0 * out["in_pub500"]
+    out["SELECT"] = out["select_score"]
     out = out.sort_values(["select_score", "qid"], ascending=[False, True], na_position="last")
     eligible = out[out["select_score"].notna()].copy()
     selected = eligible.head(TOP_N).copy()
@@ -281,8 +318,8 @@ def run_scoring(month: str, keep_file: Path | None = None) -> tuple[pd.DataFrame
             seen_before.update(_load_snapshot(path))
     ranked = apply_movement(ranked, previous, seen_before)
 
-    keepers = load_keepers(keep_file)
-    published = select_published(scored, keepers)
+    keepers = scratchpad_keepers() | load_keepers(keep_file)
+    published = select_published(scored, keepers, _incumbent_qids(month))
     metrics_dir.mkdir(parents=True, exist_ok=True)
     published.to_csv(metrics_dir / "published_500.csv", index=False, encoding=CSV_ENCODING)
     ranked.to_csv(metrics_dir / "heat_ranking.csv", index=False, encoding=CSV_ENCODING)

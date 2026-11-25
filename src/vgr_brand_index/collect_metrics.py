@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .gdelt import GdeltClient
-from .pageviews import PageviewsClient, _pv_monthly, pv_stats
+from .pageviews import PageviewsClient
 
 ROOT = Path(__file__).resolve().parents[2]
 ROSTER_DIR = ROOT / "output" / "roster"
@@ -101,6 +101,59 @@ def _checkpoint(path: Path, rows: list[dict]) -> None:
     )
 
 
+def _pv_monthly(
+    editions: dict[str, str], client: PageviewsClient,
+    window12: tuple[str, str], cache_only: bool = False,
+) -> dict[str, float]:
+    """Monthly total user pageviews summed across all language editions.
+
+    Returns {YYYYMM: total_views} over the trailing-12-month window. The
+    Wikimedia timestamp is ``YYYYMMDDHH``; the first six chars are the month.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    for lang, title in editions.items():
+        for timestamp, value in client.fetch(
+            title, lang, window12[0], window12[1], "monthly", cache_only=cache_only,
+        ):
+            totals[timestamp[:6]] += value
+    return dict(totals)
+
+
+def pv_stats(monthly: dict[str, float]) -> tuple[float, float, float]:
+    """(median, mean, total) of the monthly pageview totals."""
+    values = list(monthly.values())
+    if not values:
+        return 0.0, 0.0, 0.0
+    return (
+        float(np.median(values)),
+        float(np.mean(values)),
+        float(np.sum(values)),
+    )
+
+
+def _pageview_row(
+    brand, editions: dict[str, str], client: PageviewsClient,
+    window3: tuple[str, str], window12: tuple[str, str], start3: date, end3: date,
+) -> dict:
+    monthly = _pv_monthly(editions, client, window12, cache_only=False)
+    pv_median, _, _ = pv_stats(monthly)
+    daily: dict[date, float] = defaultdict(float)
+    for lang, title in editions.items():
+        for timestamp, value in client.fetch(
+            title, lang, window3[0], window3[1], "daily", cache_only=False,
+        ):
+            daily[datetime.strptime(timestamp[:8], "%Y%m%d").date()] += value
+    recent, level, momentum = _daily_stats(daily, start3, end3)
+    edition_value = getattr(brand, "n_editions", None)
+    n_editions = len(editions) if pd.isna(edition_value) else int(edition_value)
+    return {
+        "qid": str(brand.qid), "display": brand.display, "pv_median": pv_median,
+        "pv_recent": round(recent, 3), "pv_level": round(level, 3),
+        "pv_momentum": round(momentum, 6) if not math.isnan(momentum) else np.nan,
+        "n_editions": n_editions,
+    }
+
+
 def collect_pageviews(
     roster: pd.DataFrame, titles: dict[str, dict[str, str]], out_path: Path,
     window3: tuple[str, str], window12: tuple[str, str],
@@ -117,21 +170,14 @@ def collect_pageviews(
             if qid in done:
                 continue
             editions = titles.get(qid, {})
-            monthly = _pv_monthly(editions, client, window12, cache_only=False)
-            pv_median, _, _ = pv_stats(monthly)
-            daily: dict[date, float] = defaultdict(float)
-            for lang, title in editions.items():
-                for timestamp, value in client.fetch(
-                    title, lang, window3[0], window3[1], "daily", cache_only=False,
-                ):
-                    daily[datetime.strptime(timestamp[:8], "%Y%m%d").date()] += value
-            recent, level, momentum = _daily_stats(daily, start3, end3)
-            rows.append({
-                "qid": qid, "display": brand.display, "pv_median": pv_median,
-                "pv_recent": round(recent, 3), "pv_level": round(level, 3),
-                "pv_momentum": round(momentum, 6) if not math.isnan(momentum) else np.nan,
-                "n_editions": int(getattr(brand, "n_editions", 0) or len(editions)),
-            })
+            try:
+                rows.append(_pageview_row(
+                    brand, editions, client, window3, window12, start3, end3,
+                ))
+            except Exception as exc:
+                print(f"  pageviews retry-later {pos}/{len(roster)} {brand.display}: {exc}",
+                      flush=True)
+                continue
             _checkpoint(out_path, rows)
             print(f"  pageviews {pos}/{len(roster)} {brand.display}", flush=True)
     finally:
@@ -154,12 +200,17 @@ def collect_gdelt(
             if qid in done:
                 continue
             query = f'"{brand.display}" {FASHION_CONTEXT}'
-            volume = client.fetch_timeline(
-                query, *window3, mode="timelinevolraw", qid=qid,
-            )
-            tone = client.fetch_timeline(
-                query, *window3, mode="timelinetone", qid=qid,
-            )
+            try:
+                volume = client.fetch_timeline(
+                    query, *window3, mode="timelinevolraw", qid=qid,
+                )
+                tone = client.fetch_timeline(
+                    query, *window3, mode="timelinetone", qid=qid,
+                )
+            except Exception as exc:
+                print(f"  gdelt retry-later {pos}/{len(roster)} {brand.display}: {exc}",
+                      flush=True)
+                continue
             if volume is None or tone is None:
                 print(f"  gdelt retry-later {pos}/{len(roster)} {brand.display}", flush=True)
                 continue
