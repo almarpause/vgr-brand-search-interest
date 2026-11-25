@@ -129,6 +129,65 @@ class GdeltClient:
         print(f"    [gdelt] gave up (throttled) on {cache_key}", flush=True)
         return None
 
+    def fetch_timeline(
+        self, query: str, start: str, end: str, *, mode: str,
+        cache_only: bool = False, qid: str = "",
+    ) -> list[tuple[str, float]] | None:
+        """Return a GDELT DOC timeline without changing its time resolution.
+
+        This is the shared cached fetch used by the Stage-2 collector for both
+        ``timelinevolraw`` and ``timelinetone``.  Keeping it on this client means
+        the new pipeline uses the project's existing throttling, retry and disk
+        cache rather than creating another HTTP implementation.
+        """
+        phrase = f'"{query}"' if not query.startswith('"') else query
+        params = {
+            "query": phrase,
+            "mode": mode,
+            "format": "json",
+            "startdatetime": f"{start}000000",
+            "enddatetime": f"{end}000000",
+        }
+        slug = "".join(c for c in query if c.isalnum())[:40]
+        if mode == "timelinevolraw":
+            # Preserve the original fetch() cache key exactly, so the existing
+            # nightly cache remains reusable after introducing this generic API.
+            digest = hashlib.sha256(
+                f"{phrase}|{start}|{end}".encode("utf-8")
+            ).hexdigest()[:16]
+            cache_key = f"{slug}_{start}_{end}_{digest}"
+        else:
+            digest = hashlib.sha256(
+                f"{phrase}|{start}|{end}|{mode}".encode("utf-8")
+            ).hexdigest()[:16]
+            cache_key = f"{slug}_{mode}_{start}_{end}_{digest}"
+        data = self._get(
+            params, cache_key, cache_only=cache_only,
+            giveup_target=(qid, query),
+        )
+        if data is None:
+            return None
+
+        points: dict[datetime, float] = defaultdict(float)
+        counts: dict[datetime, int] = defaultdict(int)
+        for series in data.get("timeline", []):
+            for point in series.get("data", []):
+                dt = _to_dt(str(point.get("date", "")))
+                if dt is None:
+                    continue
+                try:
+                    value = float(point.get("value", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                points[dt] += value
+                counts[dt] += 1
+        # Multiple returned series are additive for raw volume.  Tone is an
+        # average, so average coincident points instead of summing them.
+        if mode == "timelinetone":
+            return [(dt.strftime("%Y-%m-%d"), value / counts[dt])
+                    for dt, value in sorted(points.items())]
+        return [(dt.strftime("%Y-%m-%d"), value) for dt, value in sorted(points.items())]
+
     def fetch(self, query: str, start: str, end: str,
               cache_only: bool = False, *, qid: str = "") -> list[tuple[str, int]] | None:
         """Monthly raw article counts for `query` over [start, end] (YYYYMMDD).
@@ -138,31 +197,15 @@ class GdeltClient:
         which the caller must treat as ineligible, distinct from an empty list
         (fetched, genuinely no coverage). Missing months are absent, never faked.
         """
-        phrase = f'"{query}"' if not query.startswith('"') else query
-        params = {
-            "query": phrase,
-            "mode": "timelinevolraw",
-            "format": "json",
-            "startdatetime": f"{start}000000",
-            "enddatetime": f"{end}000000",
-        }
-        digest = hashlib.sha256(f"{phrase}|{start}|{end}".encode("utf-8")).hexdigest()[:16]
-        slug = "".join(c for c in query if c.isalnum())[:40]
-        data = self._get(
-            params, f"{slug}_{start}_{end}_{digest}", cache_only=cache_only,
-            giveup_target=(qid, query),
+        timeline = self.fetch_timeline(
+            query, start, end, mode="timelinevolraw", cache_only=cache_only, qid=qid,
         )
-        if data is None:
-            return None            # not fetched -> ineligible
-
+        if timeline is None:
+            return None
         monthly: dict[str, int] = defaultdict(int)
-        for series in data.get("timeline", []):
-            for point in series.get("data", []):
-                dt = _to_dt(str(point.get("date", "")))
-                if dt is None:
-                    continue
-                val = point.get("value", 0) or 0
-                monthly[f"{dt.year:04d}-{dt.month:02d}-01"] += int(round(val))
+        for timestamp, value in timeline:
+            dt = datetime.strptime(timestamp, "%Y-%m-%d")
+            monthly[f"{dt.year:04d}-{dt.month:02d}-01"] += int(round(value))
         return sorted(monthly.items())
 
     def monthly_total(
